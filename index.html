@@ -21,7 +21,8 @@
             position: relative;
             width: 100vw;
             height: 100vh;
-            background: linear-gradient(to bottom, #4fd1ea, #2193b0); /* Ciel lagon */
+            background: url('https://i.postimg.cc/026wXBQM/Gemini-Generated-Image-mstyh8mstyh8msty.jpg') no-repeat center center;
+            background-size: cover;
             overflow: hidden;
         }
 
@@ -57,7 +58,7 @@
             position: absolute;
             top: 10%;
             font-size: 4rem;
-            color: white;
+            color: #ff9f43; /* Orange pour le contraste */
             text-shadow: 3px 3px 0 #000;
             z-index: 10;
         }
@@ -399,7 +400,7 @@
             this.size = Math.random() * 5 + 2;
             this.speedX = Math.random() * 2 - 1;
             this.speedY = Math.random() * 2 + 1;
-            this.color = 'rgba(255, 255, 255, 0.8)';
+            this.color = 'rgba(255, 223, 186, 0.8)'; // Couleur sable clair
             this.life = 20;
         }
         update() {
@@ -428,8 +429,8 @@
     }
 
     function drawBackground() {
-        // Montagnes au loin
-        ctx.fillStyle = '#1abc9c'; // Vert Lagon foncé
+        // Montagnes au loin - Ajusté pour correspondre à l'image
+        ctx.fillStyle = '#0a2e38'; // Couleur silhouette sombre du fond
         bgMountains.forEach(m => {
             ctx.beginPath();
             ctx.moveTo(m.x, m.y);
