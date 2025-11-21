@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>L'Envol du Cagou - Jeu Calédonien</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap');
+        
+        body {
+            font-family: 'Fredoka One', cursive;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #333;
+            touch-action: none; /* Empêche le zoom/scroll sur mobile */
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(to bottom, #4fd1ea, #2193b0); /* Ciel lagon */
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .interactive {
+            pointer-events: auto;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .score-display {
+            position: absolute;
+            top: 10%;
+            font-size: 4rem;
+            color: white;
+            text-shadow: 3px 3px 0 #000;
+            z-index: 10;
+        }
+
+        .btn {
+            background: #ff9f43;
+            border: 4px solid white;
+            color: white;
+            padding: 15px 30px;
+            font-size: 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            box-shadow: 0 6px 0 #d68028;
+            text-transform: uppercase;
+            margin-top: 20px;
+        }
+
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #d68028;
+        }
+
+        /* Style spécial pour la carte de fin de jeu (Screenshot) */
+        .game-over-card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 20px;
+            border: 5px solid #2193b0;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            max-width: 90%;
+            width: 350px;
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popIn {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD Score pendant le jeu -->
+    <div id="currentScore" class="score-display hidden">0</div>
+
+    <!-- Écran d'accueil -->
+    <div id="startScreen" class="ui-layer interactive">
+        <h1 class="text-5xl md:text-7xl text-white drop-shadow-[0_4px_0_rgba(0,0,0,0.5)] mb-4 tracking-wide">L'ENVOL<br>DU CAGOU</h1>
+        <p class="text-white text-xl mb-8 drop-shadow-md max-w-md px-4">Aide le Cagou à éviter les Pins colonnaires !<br>Touche l'écran ou Espace pour voler.</p>
+        <button class="btn" id="startBtn">JOUER</button>
+    </div>
+
+    <!-- Écran Game Over -->
+    <div id="gameOverScreen" class="ui-layer interactive hidden">
+        <div class="game-over-card">
+            <h2 class="text-4xl text-[#2193b0] mb-2">GAME OVER</h2>
+            <p class="text-gray-500 text-sm mb-4">Nouvelle-Calédonie</p>
+            
+            <div class="flex justify-around mb-6">
+                <div class="text-center">
+                    <p class="text-gray-400 text-sm uppercase">Score</p>
+                    <p class="text-4xl text-gray-800" id="finalScore">0</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-gray-400 text-sm uppercase">Best</p>
+                    <p class="text-4xl text-[#ff9f43]" id="bestScore">0</p>
+                </div>
+            </div>
+
+            <p class="text-xs text-gray-400 italic mb-4">Fais un screenshot et poste-le en commentaire !</p>
+            
+            <button class="btn w-full mb-3 text-xl py-3" id="restartBtn">REJOUER</button>
+            <button class="bg-[#2193b0] text-white py-2 px-4 rounded-full text-sm font-bold w-full shadow-md active:translate-y-1 transition-all" id="shareBtn">COPIER MON SCORE</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Configuration ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // UI Elements
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const currentScoreEl = document.getElementById('currentScore');
+    const finalScoreEl = document.getElementById('finalScore');
+    const bestScoreEl = document.getElementById('bestScore');
+    const startBtn = document.getElementById('startBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const shareBtn = document.getElementById('shareBtn');
+
+    // Variables de jeu
+    let frames = 0;
+    let score = 0;
+    let highScore = localStorage.getItem('cagouHighScore') || 0;
+    let gameSpeed = 3;
+    let isPlaying = false;
+    let isGameOver = false;
+    let scaleRatio = 1;
+
+    // Audio synthétisé (pour ne pas dépendre de fichiers externes)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        if (type === 'jump') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(500, audioCtx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        } else if (type === 'score') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        } else if (type === 'hit') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        }
+    }
+
+    // --- Redimensionnement Responsive ---
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        // Échelle de base sur une largeur de mobile typique (environ 400px)
+        scaleRatio = Math.min(canvas.width / 400, 1.5); 
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- Classes ---
+
+    class Bird {
+        constructor() {
+            this.x = canvas.width * 0.2;
+            this.y = canvas.height / 2;
+            this.radius = 20 * scaleRatio;
+            this.velocity = 0;
+            this.gravity = 0.25 * scaleRatio;
+            this.jumpStrength = -6.5 * scaleRatio; // Ajusté pour le poids
+            this.rotation = 0;
+            this.width = 40 * scaleRatio;
+            this.height = 30 * scaleRatio;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            // Rotation basée sur la vitesse
+            this.rotation = Math.min(Math.PI / 4, Math.max(-Math.PI / 4, (this.velocity * 0.1)));
+            ctx.rotate(this.rotation);
+
+            // Dessin du Cagou (Procédural pour éviter les images externes)
+            
+            // Corps (Gris clair)
+            ctx.fillStyle = '#bdc3c7';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, this.width/1.5, this.height/1.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Aile (Gris foncé + rayures)
+            ctx.fillStyle = '#7f8c8d';
+            ctx.beginPath();
+            ctx.ellipse(-5 * scaleRatio, 5 * scaleRatio, this.width/3, this.height/4, 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Huppe (Crête caractéristique)
+            ctx.fillStyle = '#bdc3c7'; // Gris clair
+            ctx.beginPath();
+            ctx.moveTo(-10 * scaleRatio, -15 * scaleRatio);
+            ctx.lineTo(-25 * scaleRatio, -35 * scaleRatio); // Pointe longue
+            ctx.lineTo(-15 * scaleRatio, -15 * scaleRatio);
+            ctx.lineTo(-5 * scaleRatio, -30 * scaleRatio); // Pointe courte
+            ctx.fill();
+
+            // Oeil (Rouge caractéristique)
+            ctx.fillStyle = '#e74c3c';
+            ctx.beginPath();
+            ctx.arc(10 * scaleRatio, -8 * scaleRatio, 3 * scaleRatio, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(11 * scaleRatio, -9 * scaleRatio, 1 * scaleRatio, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Bec (Orange)
+            ctx.fillStyle = '#e67e22';
+            ctx.beginPath();
+            ctx.moveTo(15 * scaleRatio, -5 * scaleRatio);
+            ctx.lineTo(35 * scaleRatio, 0);
+            ctx.lineTo(15 * scaleRatio, 5 * scaleRatio);
+            ctx.fill();
+
+            // Pattes (Oranges, visibles en vol)
+            ctx.strokeStyle = '#e67e22';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, 15 * scaleRatio);
+            ctx.lineTo(-10 * scaleRatio, 25 * scaleRatio);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        update() {
+            this.velocity += this.gravity;
+            this.y += this.velocity;
+
+            // Sol et Plafond
+            if (this.y + this.height/2 >= canvas.height) {
+                this.y = canvas.height - this.height/2;
+                gameOver();
+            }
+            if (this.y - this.height/2 <= 0) {
+                this.y = this.height/2;
+                this.velocity = 0;
+            }
+        }
+
+        flap() {
+            this.velocity = this.jumpStrength;
+            playSound('jump');
+            // Petit effet de particules
+            createParticles(this.x, this.y + 10);
+        }
+    }
+
+    class Pipe {
+        constructor() {
+            this.gap = 180 * scaleRatio; // Espace entre les pins
+            this.topHeight = Math.random() * (canvas.height - this.gap - 100 * scaleRatio) + 50 * scaleRatio;
+            this.x = canvas.width;
+            this.width = 60 * scaleRatio; // Tronc large
+            this.passed = false;
+        }
+
+        draw() {
+            // Dessin style "Pin Colonnaire"
+            
+            // -- Tronc Haut --
+            this.drawPine(this.x, 0, this.width, this.topHeight, true);
+            
+            // -- Tronc Bas --
+            this.drawPine(this.x, this.topHeight + this.gap, this.width, canvas.height - (this.topHeight + this.gap), false);
+        }
+
+        drawPine(x, y, w, h, isTop) {
+            // Tronc sombre
+            ctx.fillStyle = '#2d3436'; 
+            ctx.fillRect(x + w/4, y, w/2, h);
+
+            // Feuillage (Vert foncé Araucaria)
+            ctx.fillStyle = '#1e824c';
+            
+            // Dessiner des "étages" de feuilles
+            let segmentHeight = 30 * scaleRatio;
+            let startY = isTop ? Math.max(0, h - 100) : y;
+            let endY = isTop ? h : Math.min(canvas.height, y + 100);
+
+            // Texture simple pour le tronc
+            ctx.fillStyle = '#3e2723'; // Marron très foncé
+            ctx.fillRect(x + w/3, y, w/3, h);
+
+            // Touffes de feuilles sur les côtés
+            ctx.fillStyle = '#2ecc71'; // Vert plus vif
+            const numTufts = Math.floor(h / (40 * scaleRatio));
+            for(let i=0; i<numTufts; i++) {
+                let tuftY = isTop ? h - (i * 40 * scaleRatio) : y + (i * 40 * scaleRatio);
+                // Gauche
+                ctx.beginPath();
+                ctx.ellipse(x + w/3, tuftY, w/2, 10*scaleRatio, 0, 0, Math.PI*2);
+                ctx.fill();
+                // Droite
+                ctx.beginPath();
+                ctx.ellipse(x + w*0.66, tuftY, w/2, 10*scaleRatio, 0, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+
+        update() {
+            this.x -= gameSpeed * scaleRatio;
+
+            // Collision
+            // Boite de collision simplifiée (rectangle)
+            // Haut
+            if (bird.x + bird.width/2 > this.x + this.width/3 && 
+                bird.x - bird.width/2 < this.x + this.width*0.66 && 
+                bird.y - bird.height/2 < this.topHeight) {
+                gameOver();
+            }
+            // Bas
+            if (bird.x + bird.width/2 > this.x + this.width/3 && 
+                bird.x - bird.width/2 < this.x + this.width*0.66 && 
+                bird.y + bird.height/2 > this.topHeight + this.gap) {
+                gameOver();
+            }
+
+            // Score
+            if (this.x + this.width < bird.x && !this.passed) {
+                score++;
+                this.passed = true;
+                currentScoreEl.innerText = score;
+                playSound('score');
+                
+                // Difficulté progressive
+                if(score % 5 === 0) {
+                    gameSpeed += 0.2;
+                }
+            }
+        }
+    }
+
+    class Particle {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.size = Math.random() * 5 + 2;
+            this.speedX = Math.random() * 2 - 1;
+            this.speedY = Math.random() * 2 + 1;
+            this.color = 'rgba(255, 255, 255, 0.8)';
+            this.life = 20;
+        }
+        update() {
+            this.x -= this.speedX + (gameSpeed * 0.5); // Bouge avec le vent
+            this.y += this.speedY;
+            this.life--;
+            this.size *= 0.9;
+        }
+        draw() {
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // --- Fond Parallaxe ---
+    const bgMountains = [];
+    for(let i=0; i<10; i++) {
+        bgMountains.push({
+            x: Math.random() * window.innerWidth,
+            y: window.innerHeight,
+            w: Math.random() * 300 + 100,
+            h: Math.random() * 150 + 50
+        });
+    }
+
+    function drawBackground() {
+        // Montagnes au loin
+        ctx.fillStyle = '#1abc9c'; // Vert Lagon foncé
+        bgMountains.forEach(m => {
+            ctx.beginPath();
+            ctx.moveTo(m.x, m.y);
+            ctx.lineTo(m.x + m.w/2, m.y - m.h);
+            ctx.lineTo(m.x + m.w, m.y);
+            ctx.fill();
+            // Déplacement lent
+            m.x -= gameSpeed * 0.1;
+            if(m.x + m.w < 0) m.x = canvas.width;
+        });
+    }
+
+    // --- Logique de Jeu ---
+
+    let bird;
+    let pipes = [];
+    let particles = [];
+    let frameCount = 0;
+
+    function initGame() {
+        resize(); // Assurer la bonne taille
+        bird = new Bird();
+        pipes = [];
+        particles = [];
+        score = 0;
+        gameSpeed = 3;
+        frameCount = 0;
+        isGameOver = false;
+        isPlaying = true;
+        currentScoreEl.innerText = score;
+        currentScoreEl.classList.remove('hidden');
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        animate();
+    }
+
+    function createParticles(x, y) {
+        for(let i=0; i<5; i++) {
+            particles.push(new Particle(x, y));
+        }
+    }
+
+    function gameOver() {
+        if(isGameOver) return;
+        isGameOver = true;
+        isPlaying = false;
+        playSound('hit');
+        
+        // Gestion Score
+        if(score > highScore) {
+            highScore = score;
+            localStorage.setItem('cagouHighScore', highScore);
+        }
+
+        // UI Update
+        currentScoreEl.classList.add('hidden');
+        finalScoreEl.innerText = score;
+        bestScoreEl.innerText = highScore;
+        gameOverScreen.classList.remove('hidden');
+    }
+
+    function animate() {
+        if (!isPlaying) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        drawBackground();
+
+        // Générer les pins
+        if (frameCount % Math.floor(100 / (gameSpeed/3)) === 0) {
+            pipes.push(new Pipe());
+        }
+
+        // Gérer les pins
+        for (let i = 0; i < pipes.length; i++) {
+            pipes[i].update();
+            pipes[i].draw();
+            
+            if (pipes[i].x + pipes[i].width < 0) {
+                pipes.shift();
+                i--;
+            }
+        }
+
+        // Gérer les particules
+        for (let i = 0; i < particles.length; i++) {
+            particles[i].update();
+            particles[i].draw();
+            if (particles[i].life <= 0) {
+                particles.splice(i, 1);
+                i--;
+            }
+        }
+
+        bird.update();
+        bird.draw();
+
+        frameCount++;
+        requestAnimationFrame(animate);
+    }
+
+    // --- Contrôles ---
+
+    function jump(e) {
+        if (e.type === 'keydown' && e.code !== 'Space') return;
+        if (e.type === 'keydown') e.preventDefault(); // Empêcher scroll espace
+        
+        if (!isPlaying && !isGameOver && startScreen.classList.contains('hidden') === false) {
+            initGame();
+        } else if (isGameOver) {
+            // Ne rien faire, attendre clic bouton
+        } else {
+            bird.flap();
+        }
+    }
+
+    // Listeners globaux
+    window.addEventListener('keydown', (e) => {
+        if(e.code === 'Space') {
+            if(!isPlaying && !isGameOver && !startScreen.classList.contains('hidden')) {
+                initGame();
+            } else if (isPlaying) {
+                jump(e);
+            }
+        }
+    });
+    
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Important pour éviter les délais sur mobile
+        if(isPlaying) bird.flap();
+    }, {passive: false});
+    
+    canvas.addEventListener('mousedown', (e) => {
+        if(isPlaying) bird.flap();
+    });
+
+    // Boutons UI
+    startBtn.addEventListener('click', initGame);
+    restartBtn.addEventListener('click', initGame);
+
+    shareBtn.addEventListener('click', () => {
+        const text = `J'ai fait un score de ${score} à L'Envol du Cagou ! 🇳🇨 Essaie de me battre !`;
+        
+        // Méthode compatible mobile/moderne
+        if (navigator.share) {
+            navigator.share({
+                title: 'L\'Envol du Cagou',
+                text: text,
+                url: window.location.href
+            }).catch(console.error);
+        } else {
+            // Fallback presse-papier
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = shareBtn.innerText;
+                shareBtn.innerText = "COPIÉ !";
+                setTimeout(() => shareBtn.innerText = originalText, 2000);
+            });
+        }
+    });
+
+    // Initial render (fond)
+    resize();
+    ctx.fillStyle = '#4fd1ea';
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+
+</script>
+</body>
+</html>
